@@ -190,12 +190,16 @@ def cmd_campaign_create(args: argparse.Namespace) -> None:
     request.validate_only = not args.confirm
     if args.confirm:
         _quota_guard(args.account, len(ops))
+        from gads.interventions import mark_write_attempt
+        mark_write_attempt()  # GrowLead patch (ticket gate)
     resp = _execute_with_retry(lambda: service.mutate(request=request),
                                what=f"campaign-create {cid}")
     if resp is None:
         return
     if args.confirm:
         _track_ops(args.account, len(ops))
+        from gads.interventions import record_result
+        record_result(resp)  # GrowLead patch (ticket gate)
         print("\n✅ ZAPSÁNO:")
         for r in resp.mutate_operation_responses:
             for field in ("campaign_result", "campaign_budget_result", "campaign_criterion_result"):

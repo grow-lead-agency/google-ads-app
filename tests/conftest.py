@@ -106,7 +106,7 @@ def isolated_env(monkeypatch, tmp_path):
     monkeypatch.setattr(auth_cmd, "ENV_FILE", tmp_path / ".env")
     monkeypatch.setattr(api.time, "sleep", lambda s: None)
     for k in list(os.environ):
-        if k.startswith("GOOGLE_ADS_"):
+        if k.startswith(("GOOGLE_ADS_", "GL_ADS_")):
             monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("GOOGLE_ADS_DEVELOPER_TOKEN", "fake-dev-token")
     monkeypatch.setenv("GOOGLE_ADS_CLIENT_ID", "fake.apps.googleusercontent.com")
@@ -148,7 +148,8 @@ def recorder(monkeypatch, fake_client):
 def ns(**kw):
     """argparse.Namespace factory with the global defaults filled in."""
     import argparse
-    base = {"account": None, "json": False, "customer_id": "123-456-7890", "confirm": False}
+    base = {"account": None, "json": False, "customer_id": "123-456-7890", "confirm": False,
+            "ticket": None, "why": None}
     base.update(kw)
     return argparse.Namespace(**base)
 

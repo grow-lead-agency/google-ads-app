@@ -75,6 +75,11 @@ def _cmd(sub, name: str, func, help: str, *, cid: bool = True, write: bool = Fal
     confirmed write can never start serving unreviewed (upstream defaults to
     ENABLED; only campaign-create was PAUSED).
 
+    GrowLead patch (ticket gate, ADR-052): every write command also takes
+    --ticket and --why. With --confirm both are required (strict mode): the CLI
+    verifies the ticket at gl-ads before writing and reports mark-executed
+    after. See gads/interventions.py.
+
     `--json` is accepted both before AND after the subcommand (the docs and
     the bundled skill write it at the end). SUPPRESS keeps the subparser from
     overwriting the global value with its own default."""
@@ -84,6 +89,10 @@ def _cmd(sub, name: str, func, help: str, *, cid: bool = True, write: bool = Fal
     if write:
         sp.add_argument("--confirm", action="store_true",
                         help="Actually write (default: dry-run/plan)")
+        sp.add_argument("--ticket", default=None,
+                        help="Ticket z gl-ads (interventions/claim) — povinný s --confirm")
+        sp.add_argument("--why", default=None,
+                        help="Důvod zásahu (10–1000 znaků) — povinný s --confirm, jde do audit logu")
     if creates:
         sp.add_argument("--enabled", action="store_true",
                         help="Create as ENABLED (default: PAUSED — GrowLead safety)")
@@ -611,6 +620,24 @@ def _print_banner() -> None:
     print()
 
 
+def _dispatch(args) -> None:
+    """GrowLead patch (ticket gate): preflight → command → postflight.
+
+    Dry-run commands pass straight through (preflight returns None). With
+    --confirm the ticket is verified first; nothing runs if the gate refuses.
+    Postflight always runs after a confirmed command, even when it raised, so
+    gl-ads learns whether the write succeeded."""
+    from gads.interventions import postflight, preflight
+    ctx = preflight(args)
+    ok = False
+    try:
+        args.func(args)
+        ok = True
+    finally:
+        if ctx is not None:
+            postflight(ctx, ok)
+
+
 def main() -> None:
     try:  # don't traceback when piped into head/grep
         from signal import SIG_DFL, SIGPIPE, signal
@@ -621,7 +648,7 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
     try:
-        args.func(args)
+        _dispatch(args)
     except KeyboardInterrupt:
         print("\nPřerušeno (Ctrl-C).", file=sys.stderr)
         sys.exit(130)
