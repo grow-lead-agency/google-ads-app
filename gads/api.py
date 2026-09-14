@@ -405,6 +405,10 @@ def _run_mutation(client, account, customer_id, *, service_name, method_name,
     )
     if response is not None:
         _track_ops(account, len(operations))
+        if confirm:
+            # GrowLead patch (ticket gate): posbírej resource names pro mark-executed.
+            from gads.interventions import record_result
+            record_result(response)
     return response
 
 

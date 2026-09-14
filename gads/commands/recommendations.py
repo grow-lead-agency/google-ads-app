@@ -107,6 +107,8 @@ def cmd_recommendation_apply(args: argparse.Namespace) -> None:
     if resp is None:
         return
     _track_ops(args.account, len(ops))
+    from gads.interventions import record_result
+    record_result(resp)  # GrowLead patch (ticket gate)
     print(f"\n✅ APLIKOVÁNO — {len(ops)} doporučení:")
     for r in resp.results:
         print(f"   {r.resource_name}")
@@ -144,4 +146,6 @@ def cmd_recommendation_dismiss(args: argparse.Namespace) -> None:
     if resp is None:
         return
     _track_ops(args.account, len(resources))
+    from gads.interventions import record_result
+    record_result(resp)  # GrowLead patch (ticket gate)
     print(f"\n✅ ZAMÍTNUTO — {len(resources)} doporučení.")

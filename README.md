@@ -171,6 +171,7 @@ GOOGLE_ADS_LOGIN_CUSTOMER_ID_KLIENTB=...
 - **Peníze v měně účtu** (Kč) — na micros (×1 000 000) převádí CLI samo, oběma směry.
 - **`--json`** — strojově čitelný výstup (použij při parsování; funguje před i za názvem příkazu).
 - **Každá mutace je defaultně dry-run** — vypíše plán a přes API `validate_only` ověří proveditelnost, ale **nic nezapíše**. Skutečný zápis až s `--confirm`.
+- **GrowLead patch: ticket gate.** `--confirm` navíc vyžaduje `--ticket <id>` (z gl-ads `interventions/claim`) a `--why "důvod"` (10–1000 znaků). CLI před zápisem ověří u gl-ads, že ticket je ve stavu `claimed` a patří danému účtu, a po zápisu nahlásí `mark-executed` s resource names. Bez ticketu se do účtu nezapisuje: exit 2 = gate odmítl (chybí ticket/důvod/env, ticket nesedí), exit 3 = gl-ads nedostupné. Režim řídí `GL_ADS_TICKET_GATE`: `strict` (výchozí), `lite` (ticket nepovinný, řádek do deníčku `GL_ADS_JOURNAL_FILE`, přechodný režim), `off` (jen dev/test, hlasitě varuje). Dry-run se gate netýká. Env: `GL_ADS_URL`, `GL_ADS_API_KEY`, `GL_ADS_AGENT` (viz `.env.example`).
 - **REMOVED je trvalé** (Google Ads nemá undelete). Mazání proto vyžaduje entitu ve stavu PAUSED (`--force` obejde) — pauznout si rozmyslíš, smazat už nevrátíš.
 - Výpisy defaultně skrývají REMOVED entity (v API zůstávají viditelné navždy) a **nikdy neusekávají data** — `search_stream` vrací vše; kde výstup zkracuje `--limit`, CLI to řekne.
 - Data ve formátu `YYYY-MM-DD`; výkonnostní okna měř radši 60–90 dní (konverzní lag).

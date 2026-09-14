@@ -148,7 +148,8 @@ def recorder(monkeypatch, fake_client):
 def ns(**kw):
     """argparse.Namespace factory with the global defaults filled in."""
     import argparse
-    base = {"account": None, "json": False, "customer_id": "123-456-7890", "confirm": False}
+    base = {"account": None, "json": False, "customer_id": "123-456-7890", "confirm": False,
+            "ticket": None, "why": None}
     base.update(kw)
     return argparse.Namespace(**base)
 
