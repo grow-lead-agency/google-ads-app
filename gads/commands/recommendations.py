@@ -96,11 +96,13 @@ def cmd_recommendation_apply(args: argparse.Namespace) -> None:
         return
 
     from gads.api import _execute_with_retry, _quota_guard, _track_ops
+    from gads.interventions import mark_write_attempt
     service = client.get_service("RecommendationService")
     request = client.get_type("ApplyRecommendationRequest")
     request.customer_id = cid
     request.operations.extend(ops)
     _quota_guard(args.account, len(ops))
+    mark_write_attempt()  # GrowLead patch (ticket gate)
     resp = _execute_with_retry(
         lambda: service.apply_recommendation(request=request),
         what=f"apply-recommendation {cid}")
@@ -139,7 +141,9 @@ def cmd_recommendation_dismiss(args: argparse.Namespace) -> None:
         print("\n(dismiss nemá validate_only — tohle je jen plán) — přidej --confirm.")
         return
     from gads.api import _execute_with_retry, _quota_guard, _track_ops
+    from gads.interventions import mark_write_attempt
     _quota_guard(args.account, len(resources))
+    mark_write_attempt()  # GrowLead patch (ticket gate)
     resp = _execute_with_retry(
         lambda: service.dismiss_recommendation(request=request),
         what=f"dismiss-recommendation {cid}")

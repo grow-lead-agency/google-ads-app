@@ -170,6 +170,7 @@ def test_strict_postflight_reports_failure_and_reraises(monkeypatch, strict_env)
     monkeypatch.setattr(interventions, "requests", http)
 
     def boom(args):
+        interventions.mark_write_attempt()  # mutace odešla, pak to spadlo
         raise RuntimeError("api exploded")
 
     with pytest.raises(RuntimeError):
@@ -177,12 +178,49 @@ def test_strict_postflight_reports_failure_and_reraises(monkeypatch, strict_env)
     assert http.posts[0][1]["after"]["ok"] is False
 
 
+def test_strict_die_before_mutation_keeps_ticket_and_exit_code(monkeypatch, strict_env, capsys):
+    """Validace/_die PŘED mutací: žádný POST, ticket zůstává claimed, exit kód příkazu platí."""
+    http = _Http(get_resp=_claimed())
+    monkeypatch.setattr(interventions, "requests", http)
+    from gads.formatting import _die
+
+    with pytest.raises(SystemExit) as exc:
+        cli._dispatch(_confirmed(func=lambda a: _die("Kampaň nenalezena.", 1)))
+    assert exc.value.code == 1
+    assert http.posts == []
+    assert "zůstává claimed" in capsys.readouterr().err
+
+
 def test_postflight_failure_never_raises(monkeypatch, strict_env, capsys):
     http = _Http(get_resp=_claimed(), post_resp=_Resp(500, {}))
     monkeypatch.setattr(interventions, "requests", http)
-    cli._dispatch(_confirmed(func=lambda a: None))
+    cli._dispatch(_confirmed(func=lambda a: interventions.mark_write_attempt()))
     err = capsys.readouterr().err
     assert "mark-executed" in err and TICKET in err
+
+
+def test_postflight_internal_error_never_masks_command_result(monkeypatch, strict_env, capsys):
+    http = _Http(get_resp=_claimed())
+    monkeypatch.setattr(interventions, "requests", http)
+    monkeypatch.setattr(interventions, "collected", lambda: (_ for _ in ()).throw(RuntimeError("x")))
+    cli._dispatch(_confirmed(func=lambda a: interventions.mark_write_attempt()))
+    assert "postflight selhal" in capsys.readouterr().err
+
+
+def test_strict_non_object_json_exits_3(monkeypatch, strict_env):
+    http = _Http(get_resp=_Resp(200, []))
+    monkeypatch.setattr(interventions, "requests", http)
+    with pytest.raises(SystemExit) as exc:
+        interventions.preflight(_confirmed())
+    assert exc.value.code == 3
+
+
+def test_gate_mode_ignores_per_account_suffix(monkeypatch, strict_env):
+    monkeypatch.setenv("GL_ADS_TICKET_GATE_FOO", "off")
+    http = _Http(get_resp=_claimed())
+    monkeypatch.setattr(interventions, "requests", http)
+    ctx = interventions.preflight(_confirmed(account="foo"))
+    assert ctx is not None and ctx.mode == "strict" and len(http.gets) == 1
 
 
 def test_preflight_accepts_gov1_envelope_shape(monkeypatch, strict_env):
@@ -219,12 +257,34 @@ def test_lite_appends_journal_line_without_http(monkeypatch, tmp_path):
     http = _Http()
     monkeypatch.setattr(interventions, "requests", http)
 
-    cli._dispatch(_confirmed(ticket=None, func=lambda a: None))
+    cli._dispatch(_confirmed(ticket=None, func=lambda a: interventions.mark_write_attempt()))
     line = journal.read_text(encoding="utf-8")
     assert re.match(r"^- \d{4}-\d{2}-\d{2} \d{2}:\d{2} · Petr \(cli/google-ads-app\) · "
                     r"google 1234567890 · campaign-status · --confirm\. Důvod: " + re.escape(WHY)
                     + r"\.\n$", line)
     assert http.gets == [] and http.posts == []
+
+
+def test_lite_no_line_without_mutation_attempt(monkeypatch, tmp_path):
+    journal = tmp_path / "j.md"
+    monkeypatch.setenv("GL_ADS_TICKET_GATE", "lite")
+    monkeypatch.setenv("GL_ADS_JOURNAL_FILE", str(journal))
+    cli._dispatch(_confirmed(ticket=None, func=lambda a: None))
+    assert not journal.exists()
+
+
+def test_lite_marks_failed_attempt(monkeypatch, tmp_path):
+    journal = tmp_path / "j.md"
+    monkeypatch.setenv("GL_ADS_TICKET_GATE", "lite")
+    monkeypatch.setenv("GL_ADS_JOURNAL_FILE", str(journal))
+
+    def boom(args):
+        interventions.mark_write_attempt()
+        raise RuntimeError("api exploded")
+
+    with pytest.raises(RuntimeError):
+        cli._dispatch(_confirmed(ticket=None, func=boom))
+    assert "SELHALO" in journal.read_text(encoding="utf-8")
 
 
 def test_lite_requires_journal_file(monkeypatch):
@@ -286,13 +346,30 @@ def test_record_result_never_raises():
 # ---------------------------------------------------------------------------
 def test_run_mutation_collects_resource_names_on_confirm(fake_client, recorder, monkeypatch):
     from gads import api
-    interventions.reset_collected()
     op = fake_client.get_type("CampaignOperation")
     op.update.resource_name = "customers/1234567890/campaigns/5"
-    api._run_mutation(fake_client, None, "1234567890", service_name="CampaignService",
-                      method_name="mutate_campaigns", request_type="MutateCampaignsRequest",
-                      operations=[op], confirm=False)
-    assert interventions.collected() == []
+    kwargs = dict(service_name="CampaignService", method_name="mutate_campaigns",
+                  request_type="MutateCampaignsRequest", operations=[op])
+
+    interventions.reset_collected()
+    api._run_mutation(fake_client, None, "1234567890", confirm=False, **kwargs)
+    assert interventions.collected() == [] and not interventions.write_attempted()
+
+    interventions.reset_collected()
+    api._run_mutation(fake_client, None, "1234567890", confirm=True, **kwargs)
+    assert interventions.write_attempted()
+    # Stub z conftest vrací results i `name="operations/stub"`, takže sběr vezme obojí.
+    assert interventions.collected() == ["customers/1234567890/stub/1", "operations/stub"]
+
+
+def test_record_result_captures_long_running_operation_name():
+    interventions.reset_collected()
+
+    class _Lro:
+        name = "operations/abc"
+
+    interventions.record_result(_Lro())
+    assert interventions.collected() == ["operations/abc"]
 
 
 # ---------------------------------------------------------------------------

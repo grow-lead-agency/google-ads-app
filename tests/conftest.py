@@ -106,7 +106,7 @@ def isolated_env(monkeypatch, tmp_path):
     monkeypatch.setattr(auth_cmd, "ENV_FILE", tmp_path / ".env")
     monkeypatch.setattr(api.time, "sleep", lambda s: None)
     for k in list(os.environ):
-        if k.startswith("GOOGLE_ADS_"):
+        if k.startswith(("GOOGLE_ADS_", "GL_ADS_")):
             monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("GOOGLE_ADS_DEVELOPER_TOKEN", "fake-dev-token")
     monkeypatch.setenv("GOOGLE_ADS_CLIENT_ID", "fake.apps.googleusercontent.com")

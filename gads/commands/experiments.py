@@ -111,12 +111,15 @@ def cmd_experiment_create(args: argparse.Namespace) -> None:
     request.response_content_type = (
         client.enums.ResponseContentTypeEnum.MUTABLE_RESOURCE)
     _quota_guard(args.account, len(arm_ops))
+    from gads.interventions import mark_write_attempt, record_result
+    mark_write_attempt()  # GrowLead patch (ticket gate)
     arm_resp = _execute_with_retry(
         lambda: service.mutate_experiment_arms(request=request),
         what=f"experiment-arms {cid}")
     if arm_resp is None:
         return
     _track_ops(args.account, len(arm_ops))
+    record_result(arm_resp)
     print("\n✅ ZAPSÁNO — experiment + arms:")
     draft = None
     for r in arm_resp.results:
@@ -142,12 +145,15 @@ def cmd_experiment_schedule(args: argparse.Namespace) -> None:
         return
     service = client.get_service("ExperimentService")
     _quota_guard(args.account, 1)
+    from gads.interventions import mark_write_attempt, record_result
+    mark_write_attempt()  # GrowLead patch (ticket gate)
     resp = _execute_with_retry(
         lambda: service.schedule_experiment(resource_name=rn),
         what=f"experiment-schedule {cid}")
     if resp is None:
         return
     _track_ops(args.account, 1)
+    record_result(resp)
     print(f"\n✅ Experiment {args.experiment_id} naplánován (async — Google ho "
           f"rozjede po zpracování; long-running operation: {resp.name}).")
 
@@ -173,19 +179,23 @@ def cmd_experiment_end(args: argparse.Namespace) -> None:
         return
     service = client.get_service("ExperimentService")
     _quota_guard(args.account, 1)
+    from gads.interventions import mark_write_attempt, record_result
+    mark_write_attempt()  # GrowLead patch (ticket gate)
     if in_setup:
         op = client.get_type("ExperimentOperation")
         op.remove = rn
         request = client.get_type("MutateExperimentsRequest")
         request.customer_id = cid
         request.operations.append(op)
-        _execute_with_retry(
+        resp = _execute_with_retry(
             lambda: service.mutate_experiments(request=request),
             what=f"experiment-remove {cid}")
     else:
-        _execute_with_retry(
+        resp = _execute_with_retry(
             lambda: service.end_experiment(experiment=rn),
             what=f"experiment-end {cid}")
+    if resp is not None:
+        record_result(resp)
     _track_ops(args.account, 1)
     print(f"\n✅ Experiment {args.experiment_id} {'smazán' if in_setup else 'ukončen'}.")
 
@@ -202,12 +212,15 @@ def cmd_experiment_promote(args: argparse.Namespace) -> None:
         return
     service = client.get_service("ExperimentService")
     _quota_guard(args.account, 1)
+    from gads.interventions import mark_write_attempt, record_result
+    mark_write_attempt()  # GrowLead patch (ticket gate)
     resp = _execute_with_retry(
         lambda: service.promote_experiment(resource_name=rn),
         what=f"experiment-promote {cid}")
     if resp is None:
         return
     _track_ops(args.account, 1)
+    record_result(resp)
     print(f"\n✅ Promote spuštěn (async; long-running operation: {resp.name}).")
 
 

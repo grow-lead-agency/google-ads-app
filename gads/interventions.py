@@ -5,19 +5,26 @@ Každý skutečný zápis (`--confirm`) musí mít podpis: ticket z gl-ads
 (stav `claimed`, správný účet) a po zápisu nahlásí `mark-executed` s resource names,
 které mutace vrátila. Bez ticketu se nic nevolá.
 
-Režimy (env `GL_ADS_TICKET_GATE`, výchozí `strict`):
+Režimy (env `GL_ADS_TICKET_GATE`, výchozí `strict`, čte se JEN nesuffixovaná
+proměnná, per-account varianta se záměrně ignoruje):
   strict  ticket povinný, preflight GET + postflight POST na gl-ads.
   lite    ticket nepovinný, řádek do deníčku `GL_ADS_JOURNAL_FILE` (přechodný režim,
           než je gl-ads GOV-1 nasazený; formát = ADS-GOVERNANCE.md §6.2).
   off     jen dev/test; hlasitě varuje na stderr.
 
+Postflight se hlásí jen tehdy, když se příkaz o mutaci skutečně pokusil
+(`mark_write_attempt()` volají `_run_mutation` a všechna místa, která mutují mimo
+něj). Když příkaz skončí dřív (validace, `_die`, nenalezený objekt), ticket zůstává
+`claimed` a dá se použít znovu.
+
 Exit kódy: 2 = gate odmítl zápis (chybí ticket/důvod/env, ticket nesedí),
-3 = gl-ads nedostupné (síť, timeout, 5xx), zápis odmítnut. Dry-run (bez
+3 = gl-ads nedostupné nebo vrátilo nesmysl, zápis odmítnut. Dry-run (bez
 `--confirm`) tento modul vůbec nevolá.
 """
 from __future__ import annotations
 
 import datetime as dt
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,8 +42,9 @@ MAX_WHY_LEN = 1000
 DEFAULT_AGENT = "cli/google-ads-app"
 PRAGUE = ZoneInfo("Europe/Prague")
 
-# Resource names posbírané z odpovědí mutací během jednoho běhu CLI.
+# Stav jednoho běhu CLI: posbírané resource names + zda se o mutaci vůbec pokusilo.
 _collected: list[str] = []
+_write_attempted = False
 
 
 @dataclass
@@ -49,29 +57,46 @@ class TicketContext:
     url: str | None = None
     api_key: str | None = None
     agent: str = DEFAULT_AGENT
+    journal_path: Path | None = None
     started_at: dt.datetime = field(default_factory=lambda: dt.datetime.now(dt.timezone.utc))
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Run state
 # ---------------------------------------------------------------------------
-def gate_mode(account: str | None = None) -> str:
-    mode = (_env("GL_ADS_TICKET_GATE", account) or "strict").strip().lower()
+def gate_mode() -> str:
+    """Režim gate. Záměrně `os.getenv`, ne `_env`: per-account suffix
+    (`GL_ADS_TICKET_GATE_<ACCOUNT>`) nesmí gate potichu vypnout."""
+    mode = (os.getenv("GL_ADS_TICKET_GATE") or "strict").strip().lower()
     if mode not in GATE_MODES:
         _die(f"GL_ADS_TICKET_GATE={mode!r} není platný režim (strict|lite|off).", 2)
     return mode
 
 
 def reset_collected() -> None:
+    global _write_attempted
     _collected.clear()
+    _write_attempted = False
 
 
 def collected() -> list[str]:
     return list(_collected)
 
 
+def mark_write_attempt() -> None:
+    """Volat těsně PŘED odesláním skutečné mutace do Google Ads."""
+    global _write_attempted
+    _write_attempted = True
+
+
+def write_attempted() -> bool:
+    return _write_attempted
+
+
 def record_result(response) -> None:
-    """Posbírej resource names z odpovědi mutace. Best effort, nikdy nevyhodí."""
+    """Posbírej resource names z odpovědi mutace (results, atomic mutate,
+    long-running operation `name`). Best effort, nikdy nevyhodí."""
+    mark_write_attempt()
     try:
         for r in getattr(response, "results", None) or []:
             rn = getattr(r, "resource_name", None)
@@ -85,6 +110,9 @@ def record_result(response) -> None:
                 rn = getattr(value, "resource_name", None)
                 if rn:
                     _collected.append(rn)
+        lro = getattr(response, "name", None)
+        if isinstance(lro, str) and lro.startswith("operations/") and lro not in _collected:
+            _collected.append(lro)
     except Exception:  # noqa: BLE001 — sběr nesmí shodit zápis, který už proběhl
         pass
 
@@ -93,16 +121,20 @@ def _headers(api_key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
 
 
-def _journal_line(ctx: TicketContext) -> str:
+def _journal_line(ctx: TicketContext, exit_ok: bool) -> str:
     stamp = dt.datetime.now(PRAGUE).strftime("%Y-%m-%d %H:%M")
     agent = ctx.agent if ctx.agent != DEFAULT_AGENT else "cli"
+    outcome = "--confirm" if exit_ok else "--confirm (SELHALO, zkontroluj účet)"
     return (f"- {stamp} · {agent} (cli/google-ads-app) · google {ctx.customer_id} · "
-            f"{ctx.command} · --confirm. Důvod: {ctx.why}.\n")
+            f"{ctx.command} · {outcome}. Důvod: {ctx.why}.\n")
 
 
-def _intervention_payload(data: dict) -> dict:
+def _intervention_payload(data) -> dict | None:
     """gl-ads vrací `{intervention: {...}, adAccount: {...}}` (GOV-1 REST), nebo přímo
-    řádek. Sloučí obě podoby: stav z řádku, účet z obálky nebo z řádku."""
+    řádek. Sloučí obě podoby: stav z řádku, účet z obálky nebo z řádku.
+    Cokoliv, co není objekt, vrátí None."""
+    if not isinstance(data, dict):
+        return None
     row = data.get("intervention")
     if not isinstance(row, dict):
         return data
@@ -121,7 +153,7 @@ def preflight(args) -> TicketContext | None:
         return None
 
     account = getattr(args, "account", None)
-    mode = gate_mode(account)
+    mode = gate_mode()
     why = (getattr(args, "why", None) or "").strip()
     if len(why) < MIN_WHY_LEN:
         _die(f"--confirm vyžaduje --why (min. {MIN_WHY_LEN} znaků): důvod zásahu se zapisuje "
@@ -137,10 +169,10 @@ def preflight(args) -> TicketContext | None:
         ticket=(getattr(args, "ticket", None) or "").strip() or None,
         agent=_env("GL_ADS_AGENT", account) or DEFAULT_AGENT,
     )
+    reset_collected()
 
     if mode == "off":
         _err("⚠️  GL_ADS_TICKET_GATE=off — zápis bez ticketu a bez deníčku (jen dev/test).")
-        reset_collected()
         return ctx
 
     if mode == "lite":
@@ -148,11 +180,11 @@ def preflight(args) -> TicketContext | None:
         if not journal:
             _die("GL_ADS_TICKET_GATE=lite vyžaduje GL_ADS_JOURNAL_FILE (cesta k deníčku). "
                  "Nic nebylo zapsáno.", 2)
-        path = Path(journal).expanduser()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as fh:
-            fh.write(_journal_line(ctx))
-        reset_collected()
+        ctx.journal_path = Path(journal).expanduser()
+        try:
+            ctx.journal_path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            _die(f"Deníček {ctx.journal_path} nejde založit ({exc}). Nic nebylo zapsáno.", 2)
         return ctx
 
     # strict
@@ -182,20 +214,24 @@ def preflight(args) -> TicketContext | None:
 
     try:
         data = _intervention_payload(resp.json())
-    except ValueError:
-        _die("gl-ads vrátilo neplatný JSON pro ticket. Nic nebylo zapsáno.", 3)
+    except (ValueError, TypeError):
+        data = None
+    if data is None:
+        _die("gl-ads vrátilo neplatnou odpověď pro ticket (očekávám JSON objekt). "
+             "Nic nebylo zapsáno.", 3)
 
     status = data.get("status")
     if status != "claimed":
         _die(f"Ticket {ctx.ticket} je ve stavu {status!r}, zápis vyžaduje 'claimed'. "
              "Nic nebylo zapsáno.", 2)
-    account_info = data.get("adAccount") or {}
+    account_info = data.get("adAccount")
+    if not isinstance(account_info, dict):
+        account_info = {}
     external = _clean_id(str(account_info.get("externalAccountId") or ""))
     if external != ctx.customer_id:
         _die(f"Ticket {ctx.ticket} patří účtu {external or '?'}, příkaz míří na "
              f"{ctx.customer_id}. Nic nebylo zapsáno.", 2)
 
-    reset_collected()
     return ctx
 
 
@@ -203,9 +239,31 @@ def preflight(args) -> TicketContext | None:
 # Postflight — po zápisu
 # ---------------------------------------------------------------------------
 def postflight(ctx: TicketContext | None, exit_ok: bool) -> None:
-    """Nahlásí mark-executed. Nikdy nevyhodí; selhání jen hlasitě ohlásí."""
-    if ctx is None or ctx.mode != "strict" or not ctx.ticket:
+    """Nahlásí výsledek. Nikdy nevyhodí (ani při chybě uvnitř), aby nepřekryla
+    původní chybu příkazu. Bez pokusu o mutaci nic nehlásí a ticket zůstává
+    `claimed`."""
+    try:
+        _postflight(ctx, exit_ok)
+    except BaseException as exc:  # noqa: BLE001 — poslední záchranná síť
+        _err(f"⚠️  postflight selhal ({exc.__class__.__name__}: {exc}).")
+
+
+def _postflight(ctx: TicketContext | None, exit_ok: bool) -> None:
+    if ctx is None or ctx.mode == "off":
         return
+    if not write_attempted():
+        if ctx.mode == "strict":
+            print(f"   ticket {ctx.ticket}: žádná mutace neproběhla, ticket zůstává claimed.",
+                  file=sys.stderr)
+        return
+
+    if ctx.mode == "lite":
+        if ctx.journal_path is None:
+            return
+        with ctx.journal_path.open("a", encoding="utf-8") as fh:
+            fh.write(_journal_line(ctx, exit_ok))
+        return
+
     names = collected()
     payload = {
         "externalChangeIds": names,

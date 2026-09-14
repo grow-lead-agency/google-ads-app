@@ -399,6 +399,10 @@ def _run_mutation(client, account, customer_id, *, service_name, method_name,
     request.validate_only = not confirm
 
     _quota_guard(account, len(operations))
+    if confirm:
+        # GrowLead patch (ticket gate): od teď se počítá, že mutace mohla proběhnout.
+        from gads.interventions import mark_write_attempt
+        mark_write_attempt()
     response = _execute_with_retry(
         lambda: getattr(service, method_name)(request=request),
         what=f"{method_name} {customer_id}",
