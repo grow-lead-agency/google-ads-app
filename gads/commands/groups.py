@@ -50,7 +50,9 @@ def cmd_ad_group_create(args: argparse.Namespace) -> None:
     ag = op.create
     ag.name = args.name
     ag.campaign = campaign_service.campaign_path(cid, args.campaign)
-    ag.status = client.enums.AdGroupStatusEnum.ENABLED
+    ag.status = (client.enums.AdGroupStatusEnum.ENABLED
+                 if getattr(args, "enabled", False)
+                 else client.enums.AdGroupStatusEnum.PAUSED)
     ag.type_ = client.enums.AdGroupTypeEnum.SEARCH_STANDARD
     if args.cpc:
         ag.cpc_bid_micros = _to_micros(args.cpc)

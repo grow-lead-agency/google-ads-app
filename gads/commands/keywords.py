@@ -64,7 +64,9 @@ def cmd_keyword_add(args: argparse.Namespace) -> None:
         op = client.get_type("AdGroupCriterionOperation")
         crit = op.create
         crit.ad_group = ag_service.ad_group_path(cid, args.ad_group)
-        crit.status = client.enums.AdGroupCriterionStatusEnum.ENABLED
+        crit.status = (client.enums.AdGroupCriterionStatusEnum.ENABLED
+                       if getattr(args, "enabled", False)
+                       else client.enums.AdGroupCriterionStatusEnum.PAUSED)
         crit.keyword.text = kw["text"]
         crit.keyword.match_type = client.enums.KeywordMatchTypeEnum[
             kw.get("match_type", "broad").upper()

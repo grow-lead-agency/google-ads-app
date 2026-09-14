@@ -65,9 +65,15 @@ from gads.commands.targeting import (cmd_campaign_targeting,
 from gads.api import DEFAULT_GEO_TARGET_ID, DEFAULT_LANGUAGE_ID
 
 
-def _cmd(sub, name: str, func, help: str, *, cid: bool = True, write: bool = False):
+def _cmd(sub, name: str, func, help: str, *, cid: bool = True, write: bool = False,
+         creates: bool = False):
     """Add a subcommand: positional customer_id (unless cid=False) and, for
     writes, --confirm (real write; default = validate-only dry-run).
+
+    GrowLead patch: commands that CREATE a servable entity (ad group, RSA,
+    keyword, DSA) get --enabled. Without it the entity is created PAUSED, so a
+    confirmed write can never start serving unreviewed (upstream defaults to
+    ENABLED; only campaign-create was PAUSED).
 
     `--json` is accepted both before AND after the subcommand (the docs and
     the bundled skill write it at the end). SUPPRESS keeps the subparser from
@@ -78,6 +84,9 @@ def _cmd(sub, name: str, func, help: str, *, cid: bool = True, write: bool = Fal
     if write:
         sp.add_argument("--confirm", action="store_true",
                         help="Actually write (default: dry-run/plan)")
+    if creates:
+        sp.add_argument("--enabled", action="store_true",
+                        help="Create as ENABLED (default: PAUSED — GrowLead safety)")
     sp.add_argument("--json", dest="json", action="store_true", default=argparse.SUPPRESS,
                     help="Machine-readable JSON output")
     sp.set_defaults(func=func)
@@ -201,7 +210,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = _cmd(sub, "ad-groups", cmd_ad_groups, "List ad groups")
     sp.add_argument("--campaign", help="Filter by campaign ID")
 
-    sp = _cmd(sub, "ad-group-create", cmd_ad_group_create, "Create an ad group", write=True)
+    sp = _cmd(sub, "ad-group-create", cmd_ad_group_create, "Create an ad group", write=True, creates=True)
     sp.add_argument("--campaign", required=True, help="Campaign ID")
     sp.add_argument("--name", required=True)
     sp.add_argument("--cpc", type=float, help="Default CPC bid in CZK")
@@ -218,7 +227,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--only-problems", dest="only_problems", action="store_true",
                     help="Show only non-APPROVED ads")
 
-    sp = _cmd(sub, "rsa-create", cmd_rsa_create, "Create a responsive search ad", write=True)
+    sp = _cmd(sub, "rsa-create", cmd_rsa_create, "Create a responsive search ad", write=True, creates=True)
     sp.add_argument("--ad-group", dest="ad_group", required=True, help="Ad group ID")
     sp.add_argument("--headlines", required=True,
                     help="Pipe-separated, 3–15 items, ≤30 chars each. Pin with a trailing "
@@ -247,7 +256,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--ad-group", dest="ad_group", help="Filter by ad group ID")
     sp.add_argument("--campaign", help="Filter by campaign ID")
 
-    sp = _cmd(sub, "keyword-add", cmd_keyword_add, "Batch-add positive keywords (JSON)", write=True)
+    sp = _cmd(sub, "keyword-add", cmd_keyword_add, "Batch-add positive keywords (JSON)", write=True, creates=True)
     sp.add_argument("--ad-group", dest="ad_group", required=True, help="Ad group ID")
     sp.add_argument("--keywords-json", dest="keywords_json", required=True,
                     help='JSON array: [{"text":"...","match_type":"phrase","cpc":25}]')
@@ -491,13 +500,13 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Serve only from a page feed (not implemented here) ")
 
     sp = _cmd(sub, "dsa-ad-group-create", cmd_dsa_ad_group_create,
-              "Create a DSA ad group (SEARCH_DYNAMIC_ADS)", write=True)
+              "Create a DSA ad group (SEARCH_DYNAMIC_ADS)", write=True, creates=True)
     sp.add_argument("--campaign", required=True, help="DSA-enabled campaign ID")
     sp.add_argument("--name", required=True)
     sp.add_argument("--cpc", type=float, help="Default CPC bid in CZK")
 
     sp = _cmd(sub, "dsa-create", cmd_dsa_create,
-              "Create an Expanded DSA ad (descriptions only)", write=True)
+              "Create an Expanded DSA ad (descriptions only)", write=True, creates=True)
     sp.add_argument("--ad-group", dest="ad_group", required=True, help="DSA ad group ID")
     sp.add_argument("--descriptions", required=True, help="Pipe-separated, 1–2 × ≤90 chars")
 

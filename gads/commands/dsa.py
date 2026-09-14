@@ -53,7 +53,9 @@ def cmd_dsa_ad_group_create(args: argparse.Namespace) -> None:
     ag = op.create
     ag.name = args.name
     ag.campaign = client.get_service("CampaignService").campaign_path(cid, args.campaign)
-    ag.status = client.enums.AdGroupStatusEnum.ENABLED
+    ag.status = (client.enums.AdGroupStatusEnum.ENABLED
+                 if getattr(args, "enabled", False)
+                 else client.enums.AdGroupStatusEnum.PAUSED)
     ag.type_ = client.enums.AdGroupTypeEnum.SEARCH_DYNAMIC_ADS
     if args.cpc:
         ag.cpc_bid_micros = _to_micros(args.cpc)
@@ -82,7 +84,9 @@ def cmd_dsa_create(args: argparse.Namespace) -> None:
 
     op = client.get_type("AdGroupAdOperation")
     aga = op.create
-    aga.status = client.enums.AdGroupAdStatusEnum.ENABLED
+    aga.status = (client.enums.AdGroupAdStatusEnum.ENABLED
+                  if getattr(args, "enabled", False)
+                  else client.enums.AdGroupAdStatusEnum.PAUSED)
     aga.ad_group = client.get_service("AdGroupService").ad_group_path(cid, args.ad_group)
     aga.ad.expanded_dynamic_search_ad.description = descriptions[0]
     if len(descriptions) > 1:

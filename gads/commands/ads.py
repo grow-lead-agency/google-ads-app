@@ -162,7 +162,9 @@ def cmd_rsa_create(args: argparse.Namespace) -> None:
     ag_service = client.get_service("AdGroupService")
     op = client.get_type("AdGroupAdOperation")
     aga = op.create
-    aga.status = client.enums.AdGroupAdStatusEnum.ENABLED
+    aga.status = (client.enums.AdGroupAdStatusEnum.ENABLED
+                  if getattr(args, "enabled", False)
+                  else client.enums.AdGroupAdStatusEnum.PAUSED)
     aga.ad_group = ag_service.ad_group_path(cid, args.ad_group)
     aga.ad.final_urls.append(args.final_url)
     for text, pin in headlines:
