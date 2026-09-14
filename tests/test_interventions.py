@@ -47,9 +47,12 @@ class _Http:
         return self.post_resp or _Resp(200, {})
 
 
-def _claimed(external="1234567890", status="claimed"):
-    return _Resp(200, {"id": TICKET, "status": status,
-                       "adAccount": {"externalAccountId": external}})
+def _claimed(external="1234567890", status="claimed", envelope=False):
+    row = {"id": TICKET, "status": status}
+    account = {"externalAccountId": external}
+    if envelope:  # GOV-1 REST shape: adAccount vedle intervention
+        return _Resp(200, {"intervention": row, "adAccount": account})
+    return _Resp(200, {**row, "adAccount": account})
 
 
 @pytest.fixture
@@ -180,6 +183,21 @@ def test_postflight_failure_never_raises(monkeypatch, strict_env, capsys):
     cli._dispatch(_confirmed(func=lambda a: None))
     err = capsys.readouterr().err
     assert "mark-executed" in err and TICKET in err
+
+
+def test_preflight_accepts_gov1_envelope_shape(monkeypatch, strict_env):
+    http = _Http(get_resp=_claimed(envelope=True))
+    monkeypatch.setattr(interventions, "requests", http)
+    ctx = interventions.preflight(_confirmed())
+    assert ctx is not None and ctx.ticket == TICKET
+
+
+def test_preflight_envelope_with_wrong_status_is_refused(monkeypatch, strict_env):
+    http = _Http(get_resp=_claimed(status="executed", envelope=True))
+    monkeypatch.setattr(interventions, "requests", http)
+    with pytest.raises(SystemExit) as exc:
+        interventions.preflight(_confirmed())
+    assert exc.value.code == 2
 
 
 def test_customer_id_dashes_are_normalised(monkeypatch, strict_env):

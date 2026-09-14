@@ -101,10 +101,15 @@ def _journal_line(ctx: TicketContext) -> str:
 
 
 def _intervention_payload(data: dict) -> dict:
-    """gl-ads vrací buď přímo řádek, nebo obálku {intervention: {...}}."""
-    if isinstance(data.get("intervention"), dict):
-        return data["intervention"]
-    return data
+    """gl-ads vrací `{intervention: {...}, adAccount: {...}}` (GOV-1 REST), nebo přímo
+    řádek. Sloučí obě podoby: stav z řádku, účet z obálky nebo z řádku."""
+    row = data.get("intervention")
+    if not isinstance(row, dict):
+        return data
+    merged = dict(row)
+    if isinstance(data.get("adAccount"), dict):
+        merged["adAccount"] = data["adAccount"]
+    return merged
 
 
 # ---------------------------------------------------------------------------
