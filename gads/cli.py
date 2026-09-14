@@ -473,7 +473,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp = _cmd(sub, "conversion-update", cmd_conversion_update,
               "Update a conversion action", write=True)
     sp.add_argument("conversion_id")
-    sp.add_argument("--status", choices=["enabled", "paused", "hidden"])
+    # Google has no PAUSED state for conversion actions: the enum is
+    # ENABLED / HIDDEN / REMOVED. Upstream offered "paused", which crashed with
+    # KeyError before reaching the API. REMOVED is permanent, so it stays out.
+    sp.add_argument("--status", choices=["enabled", "hidden"])
     sp.add_argument("--primary", choices=["yes", "no"], help="primary_for_goal")
     sp.add_argument("--counting", choices=["one", "many"])
     sp.add_argument("--value", type=float, help="Default value (always used)")
