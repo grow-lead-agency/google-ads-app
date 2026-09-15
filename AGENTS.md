@@ -32,7 +32,10 @@ podle `../AGENTS.md` (permission tier "ask", Cutegory navíc Martin).
 
 **CI nikdy nevolá reálné Google Ads API:** workflow nemá žádná tajemství (`permissions: contents: read`,
 `persist-credentials: false`), testy běží proti fake klientovi. Runner je natvrdo `ubuntu-latest`, protože repo
-je veřejné a org proměnná `CI_RUNNER` míří na self-hosted runner. Nový test nesmí sahat na síť ani na
+je veřejné a org proměnná `CI_RUNNER` míří na self-hosted runner. Pytest běží s `--disable-socket` (pytest-socket, jen v `pyproject.toml`): test,
+který by obešel recorder a sáhl na síť přes Python sockety (requests, google-auth refresh), spadne na
+`SocketBlockedError`. gRPC C-core pojistka nepokrývá, tam drží bezpečnost fake credentials a CI bez tajemství.
+Nový test nesmí sahat na síť ani na
 credentials; kdyby musel, dostane marker `integration` a do CI nepatří.
 
 **Upstream merge a závislosti:** runtime (`setup.sh`) instaluje z `requirements.txt`, CI z `uv.lock`. Když merge

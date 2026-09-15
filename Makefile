@@ -39,7 +39,7 @@ docs-check:
 check: deps-check lint test docs-check
 
 audit:
-	uv export --format requirements-txt --no-dev --no-emit-project --quiet -o .tmp-pip-audit.txt && { uv run pip-audit -r .tmp-pip-audit.txt --require-hashes --progress-spinner off; rc=$$?; rm -f .tmp-pip-audit.txt; exit $$rc; }
+	tmp="$$(mktemp)"; trap 'rm -f "$$tmp"' EXIT; uv export --format requirements-txt --no-dev --no-emit-project --locked --quiet -o "$$tmp"; uv run pip-audit -r "$$tmp" --require-hashes --progress-spinner off
 	@if command -v gitleaks >/dev/null 2>&1; then gitleaks git --redact --verbose; else printf '%s\n' 'gitleaks not installed, skipped'; fi
 
 lock:

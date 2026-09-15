@@ -25,6 +25,10 @@ dev = [
     "pytest>=8,<9",
     "ruff==0.16.7",
     "pip-audit==2.10.1",
+    # Síťová pojistka testů (addopts --disable-socket), config-only, bez změny upstream testů.
+    "pytest-socket==0.8.1",
+    # Import v .github/scripts/check_requirements_sync.py, explicitně (ne tranzitivně přes pytest).
+    "packaging==26.3",
 ]
 
 [tool.uv]
@@ -42,7 +46,8 @@ select = ["E9", "F63", "F7", "F82"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--strict-markers --strict-config"
+# --disable-socket: test, který by omylem obešel mock (requests, google-auth), spadne místo volání ven.
+addopts = "--strict-markers --strict-config --disable-socket --allow-unix-socket"
 filterwarnings = ["error"]
 markers = [
     "integration: needs network or real credentials (never part of CI; none exist today)",

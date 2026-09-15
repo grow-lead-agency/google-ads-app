@@ -23,8 +23,14 @@ def _parse_lines(lines: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     for raw in lines:
         line = raw.split("#", 1)[0].strip()
-        if not line or line.startswith("-"):  # -r / -e / --index-url se nekontroluje
+        if not line:
             continue
+        if line.startswith("-"):
+            # Jediná povolená volba: requirements-dev.txt vkládá runtime přes `-r requirements.txt`.
+            # Cokoliv jiného (-e git+..., --index-url, -r jiný soubor) instaluje setup.sh mimo lock.
+            if line.split() == ["-r", "requirements.txt"]:
+                continue
+            raise SystemExit(f"Nepovolená volba v requirements*.txt: '{line}' (mimo uv.lock)")
         req = Requirement(line)
         key = canonicalize_name(req.name) + (f"[{','.join(sorted(req.extras))}]" if req.extras else "")
         marker = f"; {req.marker}" if req.marker else ""
