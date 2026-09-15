@@ -1,0 +1,50 @@
+# GrowLead fork tooling (GRO-1302, Python Standard v1, adopce vlna 1).
+# CI NIKDY nevolá reálné Google Ads API: testy jedou proti fake klientovi (tests/conftest.py),
+# workflow nemá žádná tajemství a nemá oprávnění zapisovat.
+#
+# Runner je natvrdo GitHub-hosted: repo je PUBLIC a org proměnná CI_RUNNER míří na self-hosted
+# runner (m5). Self-hosted runner na veřejném repu = cizí PR spustí kód na našem stroji.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [growlead-safety]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Lock, lint, test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+          version: "0.12.13"
+
+      - name: Sync (Python z .python-version)
+        run: uv sync --locked
+
+      - name: Lock a requirements*.txt drift
+        run: make deps-check
+
+      - name: Lint (vlna 1, jen syntaktické chyby)
+        run: make lint
+
+      - name: Test (offline)
+        run: make test
+
+      - name: Docs consistency (upstream check)
+        run: make docs-check
